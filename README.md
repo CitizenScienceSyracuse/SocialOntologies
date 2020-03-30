@@ -1,1 +1,1 @@
-# SocialOntologies
+# Social Ontologies
