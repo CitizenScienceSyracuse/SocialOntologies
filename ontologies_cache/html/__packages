@@ -1,0 +1,12 @@
+base
+NLP
+tm
+readr
+dplyr
+tidytext
+reshape2
+Matrix
+arules
+arulesViz
+stringi
+data.table

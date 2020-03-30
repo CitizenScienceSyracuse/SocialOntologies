@@ -1,0 +1,170 @@
+---
+title: "Discovering Ontologies for Social Marked Entities"
+author: "Corey Jackson"
+date: "3/26/2020"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+# required packages
+library(tm)
+library(readr)
+library(dplyr)
+library(tidytext)
+library(reshape2)
+library(arules)
+library(arulesViz)
+library(stringi)
+library(data.table)
+removeURL <- function(x) gsub("http[[:alnum:][:punct:]]*", "", x)
+```
+
+```{r setup-tags, include=FALSE, cache=TRUE}
+# Data import all downloaded 12/19/2019 
+# https://www.tidytextmining.com/
+hashtags <- read_csv("~/Dropbox/Research/Research/Language Socialization/Data/gravity_spy_hashtags_2019.csv")
+hashtags <- hashtags[,-c(1:3)] #clean hashtags 
+
+# creating a tdm 
+hashtags_matrix <- dcast(hashtags, comment_id ~ tag,
+               value.var = "tag", fun.aggregate = length)
+
+# put document name in index
+row.names(hashtags_matrix) <- hashtags_matrix[,1]
+hashtags_matrix <- hashtags_matrix[,2:length(hashtags_matrix)]
+# replace numbers greater than 1 with 1
+hashtags_matrix[hashtags_matrix>1] <- 1 
+
+# remove illegal characters from column names
+#hashtags_matrix2 <- hashtags_matrix[,5:length(hashtags_matrix)]
+hashtags_matrix[] <- lapply(hashtags_matrix, function(x) as.numeric(as.character(x)))
+
+#Convert to matrix
+hash <- data.matrix(hashtags_matrix)
+d <- as(hash, "transactions")
+```
+
+```{r tag-rules, cache=TRUE}
+frequentItems <- eclat(hash, parameter = list(supp = 0.001, maxlen = 15)) # calculates support for frequent items
+inspect(head(sort(frequentItems),n=10))
+#inspect(frequentItems)
+#plot(frequentItems, method="graph", control=list(type="items"))
+
+rules <- apriori(hash,parameter=list(support=0.001,confidence=0.001))
+inspect(head(sort(rules),n=10))
+#inspect(rules)
+#plot(rules, method="graph", control=list(type="items"))
+
+rulesrhs <- apriori(hash,parameter=list(support=0.001,confidence=0.01), appearance = list(default="lhs",rhs=c("blip")))
+inspect(head(sort(rulesrhs),n=10))
+#inspect(rulesrhs)
+#plot(rulesrhs, method="graph", control=list(type="items"))
+   
+ruleslhs <- apriori (data=hash, parameter=list (supp=0.001,conf = 0.001,minlen=2), appearance = list(default="rhs",lhs="blip"), control = list (verbose=F)) 
+inspect(head(sort(ruleslhs),n=10))
+#inspect(ruleslhs)
+#plot(ruleslhs, method="graph", control=list(type="items"))
+```
+
+```{r}
+hashtags %>%
+  count(tag, sort = TRUE)  %>%
+  top_n(10,n)
+```
+
+```{r setup-comments, include=FALSE, warning=FALSE,message=FALSE, cache=TRUE}
+comments <- read_csv("~/Dropbox/Research/Research/Language Socialization/Data/gravity-spy-comments.csv")
+comments <- comments[,-c(1:3)] #clean comments 
+
+malletwords <- scan("~/Dropbox/INSPIRE/Papers & Presentations/Language Evolution (ICIS)/Data Analysis/mallet.txt", character(), quote = "")
+malletwords <- malletwords[which(!malletwords %in% c("zero","example","novel","help","none","above","q","different","new"))]
+
+domainsciencewords <- scan("~/Dropbox/Research/Research/Social Automated Ontologies/domainscience.txt", character(), quote = "")
+
+domainsciencewords <- tolower(gsub('[[:punct:]]', ' ', domainsciencewords))
+domainsciencewords <- removeNumbers(domainsciencewords)
+domainsciencewords <- removeWords(domainsciencewords, c(stopwords("english"),malletwords))
+domainsciencewords  <- stringi::stri_trans_general(domainsciencewords, "latin-ascii")
+domainsciencewords <- domainsciencewords[domainsciencewords != ""]
+domainsciencewords <- domainsciencewords[domainsciencewords != " "]
+domainsciencewords <- gsub(' ', '', domainsciencewords)
+domainsciencewords <- unique(domainsciencewords)
+
+comments$filtered_wordsnew <- removeNumbers(comments$comment_body)
+comments$filtered_wordsnew <- removeURL(comments$filtered_wordsnew)
+comments$filtered_wordsnew <- tolower(gsub('[[:punct:]]', ' ', comments$filtered_wordsnew))
+comments$filtered_wordsnew <- removeWords(comments$filtered_wordsnew, c(stopwords("english"),malletwords))
+comments$filtered_wordsnew  <- stringi::stri_trans_general(comments$filtered_wordsnew, "latin-ascii")
+
+# remove deleted comments because they only contained stopwords
+comments <- comments[!(comments$filtered_wordsnew  %in% c(""," ","  ","   ","    ","     ","      ")), ] 
+comments <- comments[which(!comments$comment_id %in% c("292084","294846","392683")),]
+
+#rename old comment column
+comments$filtered_words <- NULL
+comments$filtered_words <- comments$filtered_wordsnew
+comments$filtered_wordsnew <- NULL
+comments <- as.data.frame(comments)
+
+# parse comment and hashtag datasets to unigrams
+unigram_comments <- comments %>% unnest_tokens(unigram, 
+                                               filtered_words, token = "ngrams", n = 1)
+unigram_comments <- data.frame(unigram_comments)
+# remove NAs
+unigram_comments <- unigram_comments[which(!is.na(unigram_comments$unigram)),]
+#comments_matrix <- dcast(unigram_comments, comment_id ~ unigram, value.var = "unigram", fun.aggregate = length) less efficient than using data.table
+
+unigram_comments <- data.table(unigram_comments)
+comments_matrix <- dcast.data.table(unigram_comments, comment_id ~ unigram,
+               value.var = "unigram", fun.aggregate = length)
+# put document name in index
+comments_matrix <- data.frame(comments_matrix)
+row.names(comments_matrix) <- comments_matrix[,1]
+comments_matrix <- comments_matrix[,2:length(comments_matrix)]
+# replace numbers greater than 1 with 1
+comments_matrix[comments_matrix>1] <- 1 
+
+# remove illegal characters from column names
+#hashtags_matrix2 <- hashtags_matrix[,5:length(hashtags_matrix)]
+comments_matrix[] <- lapply(comments_matrix, function(x) as.numeric(as.character(x)))
+
+#Convert to matrix
+hash2 <- data.matrix(comments_matrix)
+d2 <- as(hash2, "transactions")
+```
+
+#### Top 10 words
+```{r}
+unigram_comments %>%
+  count(unigram, sort = TRUE)  %>%
+  top_n(10,n)
+```
+
+
+```{r comment-rules}
+frequentItems_comments <- eclat(hash2, parameter = list(supp = 0.001, maxlen = 15)) # calculates support for frequent items
+inspect(head(sort(frequentItems_comments),n=10))
+#inspect(frequentItems_comments)
+#plot(frequentItems_comments, method="graph", control=list(type="items"))
+
+rules_comments <- apriori(hash2,parameter=list(support=0.005,confidence=0.02))
+inspect(head(sort(rules_comments),n=10))
+
+#plot(rules_comments, method="graph", control=list(type="items"))
+
+rulesrhs_comments <- apriori(hash2,parameter=list(support=0.001,confidence=0.01), appearance = list(default="lhs",rhs=c("blip")))
+inspect(head(sort(rulesrhs_comments),n=10))
+
+#plot(rulesrhs_comments, method="graph", control=list(type="items"))
+   
+ruleslhs_comments <- apriori (data=hash2, parameter=list (supp=0.001,conf = 0.01,minlen=2), appearance = list(default="rhs",lhs="loss"), control = list (verbose=F)) 
+inspect(ruleslhs_comments)
+#plot(ruleslhs_comments, method="graph", control=list(type="items"))
+```
+
+## Introduction 
+Automatic identification of 
+
+## Methods
+
+## Results
